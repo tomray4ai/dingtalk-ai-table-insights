@@ -553,8 +553,9 @@ def analyze_with_llm(tables_data: List[Dict], keyword: str = "") -> str:
     """
     使用大模型分析表格数据，生成洞察报告（默认启用）
     
-    当前实现：使用本地模板（稳定、快速）
-    未来规划：集成 MCP 大模型服务器进行深度分析
+    检测运行环境：
+    - 如果在 OpenClaw 会话中，使用 sessions_spawn 调用大模型
+    - 否则使用本地模板（降级方案）
     
     Args:
         tables_data: 表格数据列表
@@ -563,12 +564,77 @@ def analyze_with_llm(tables_data: List[Dict], keyword: str = "") -> str:
     Returns:
         洞察报告（Markdown 格式）
     """
-    print("🤖 大模型分析模式...")
-    print("   ℹ️  当前使用本地模板生成报告（稳定、快速）")
-    print("   💡 未来版本将支持 MCP 大模型服务器进行深度分析")
-    print("   📊 正在生成报告...")
+    import os
     
-    # 使用本地模板生成报告
+    print("🤖 使用大模型进行分析...")
+    
+    # 检测是否在 OpenClaw 会话环境中
+    # 检查是否有 OpenClaw 会话存储
+    session_store = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
+    in_openclaw_session = os.path.exists(session_store)
+    
+    if in_openclaw_session:
+        print("   ℹ️  检测到 OpenClaw 会话环境")
+        print("   🔄 尝试调用大模型...")
+        
+        # 构建简化的分析请求
+        summary = {
+            "keyword": keyword,
+            "tables_count": len(tables_data),
+            "total_records": sum(len(t.get("records", [])) for t in tables_data),
+            "tables": [
+                {
+                    "name": t.get("table_name"),
+                    "records": len(t.get("records", [])),
+                    "sheets": len(t.get("sheets", []))
+                }
+                for t in tables_data
+            ]
+        }
+        
+        prompt = f"""请分析以下钉钉 AI 表格数据并生成洞察报告：
+
+**关键词**: {keyword or '全量扫描'}
+**表格数**: {len(tables_data)}
+**总记录数**: {summary['total_records']}
+
+**表格详情**:
+{json.dumps(summary['tables'], ensure_ascii=False, indent=2)}
+
+请生成一份包含以下内容的 Markdown 报告：
+1. 执行摘要（关键指标）
+2. 详细数据分析
+3. 风险与异常识别
+4. 行动建议（具体可执行）
+
+报告要求：
+- 使用 Markdown 格式
+- 适当使用 emoji
+- 800-1500 字
+- 适合在钉钉中查看"""
+        
+        try:
+            # 使用 openclaw agent 调用
+            result = subprocess.run(
+                ["openclaw", "agent", "--message", prompt, "--json"],
+                capture_output=True,
+                text=True,
+                timeout=90
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                output = json.loads(result.stdout.strip())
+                reply = output.get("reply", "")
+                if reply:
+                    print("   ✅ 大模型分析完成")
+                    return reply
+            
+            print(f"   ⚠️  调用失败：{result.stderr[:100] if result.stderr else '无响应'}")
+        except Exception as e:
+            print(f"   ⚠️  调用异常：{e}")
+    
+    # 降级使用本地模板
+    print("   📝 使用本地模板生成报告（快速模式）")
     return generate_insight_report(tables_data, keyword)
 
 
