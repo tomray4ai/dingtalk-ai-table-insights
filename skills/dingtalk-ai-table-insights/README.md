@@ -1,0 +1,111 @@
+# 📊 dingtalk-ai-table-insights
+
+> 钉钉 AI 表格跨表格洞察分析 - 让 AI 帮你从多个表格中发现洞察、识别风险、给出建议
+
+## 快速开始
+
+### 前提条件
+
+⚠️ **本技能依赖 `dingtalk-ai-table` 技能及其 MCP 配置**
+
+### 1. 安装依赖技能
+
+```bash
+# 先安装基础技能（负责 MCP 配置）
+clawhub install dingtalk-ai-table
+
+# 配置 MCP（一次配置）
+# 详见：~/.openclaw/skills/dingtalk-ai-table/references/configuration.md
+```
+
+### 2. 安装本技能
+
+```bash
+clawhub install dingtalk-ai-table-insights
+```
+
+### 3. 运行分析
+
+```bash
+# 关键词筛选
+python3 scripts/analyze_tables.py --keyword "销售"
+
+# 全量扫描
+python3 scripts/analyze_tables.py
+```
+
+---
+
+## 📋 配置说明
+
+**MCP 配置由 `dingtalk-ai-table` 技能管理**
+
+本技能复用其配置，无需重复配置。
+
+详见：
+- `references/architecture.md` - 架构说明
+- `references/configuration.md` - 配置指南
+
+---
+
+## 🏗️ 架构
+
+```
+dingtalk-ai-table-insights (分析)
+    ↓
+dingtalk-ai-table (数据 + 配置)
+    ↓
+钉钉 AI 表格 MCP
+```
+
+## 核心功能
+
+- 🔍 **关键词筛选** - 专注特定业务/项目
+- 📊 **跨表格分析** - 发现单一表格看不到的关联
+- 🚨 **风险预警** - 主动识别问题
+- 📋 **行动建议** - 给出可执行的方案
+
+## 使用场景
+
+| 场景 | 命令 |
+|------|------|
+| 销售分析 | `--keyword "销售"` |
+| 项目追踪 | `--keyword "华东项目"` |
+| 招聘分析 | `--keyword "招聘"` |
+| 全局扫描 | 不指定参数 |
+
+## 安全说明
+
+- ✅ **只读操作** - 不修改任何数据
+- ✅ **本地分析** - 数据不出本地
+- ✅ **权限最小化** - 仅需读取权限
+- ✅ **数据抽样** - 每表最多 50 条
+
+详细安全说明见 [SKILL.md](SKILL.md)
+
+## 文档
+
+- [完整技能说明](SKILL.md)
+- [设计愿景](VISION.md)
+- [使用示例](references/examples.md)
+- [快速开始](references/quickstart.md)
+
+## 依赖
+
+- Python 3.7+
+- **dingtalk-ai-table** skill - 钉钉 AI 表格操作技能
+- 钉钉 AI 表格 MCP token
+
+### 安装依赖技能
+
+```bash
+# 安装 dingtalk-ai-table
+clawhub install dingtalk-ai-table
+
+# 验证安装
+clawhub list
+```
+
+## 许可证
+
+MIT License
