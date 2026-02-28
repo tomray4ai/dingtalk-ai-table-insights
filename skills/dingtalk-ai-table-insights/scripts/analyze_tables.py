@@ -553,10 +553,8 @@ def analyze_with_llm(tables_data: List[Dict], keyword: str = "") -> str:
     """
     使用大模型分析表格数据，生成洞察报告（默认启用）
     
-    大模型调用策略（按优先级）：
-    1. OpenClaw sessions_send（如果在 OpenClaw 会话中）
-    2. MCP 大模型服务器（如果配置了）
-    3. 降级使用本地模板（保底方案）
+    当前实现：使用本地模板（稳定、快速）
+    未来规划：集成 MCP 大模型服务器进行深度分析
     
     Args:
         tables_data: 表格数据列表
@@ -565,155 +563,12 @@ def analyze_with_llm(tables_data: List[Dict], keyword: str = "") -> str:
     Returns:
         洞察报告（Markdown 格式）
     """
-    import subprocess
-    import os
-    import tempfile
+    print("🤖 大模型分析模式...")
+    print("   ℹ️  当前使用本地模板生成报告（稳定、快速）")
+    print("   💡 未来版本将支持 MCP 大模型服务器进行深度分析")
+    print("   📊 正在生成报告...")
     
-    # 构建分析 Prompt
-    system_prompt = """你是一个数据分析专家，擅长从企业数据中发现洞察和风险。
-
-## 分析维度
-1. **数据一致性检查** - 跨表格对比相同指标，发现矛盾
-2. **趋势洞察** - 从多个表格中发现关联和模式
-3. **风险预警** - 识别异常和高风险项（按优先级排序）
-4. **行动建议** - 给出具体可执行的建议（做什么 + 谁来做 + 何时完成）
-
-## 输出格式
-- 使用 Markdown 格式
-- 适当使用 emoji 增强可读性
-- 字数控制在 800-1500 字
-- 适合在钉钉中查看
-- 不要提及技术细节（如权限问题、API 错误等）
-"""
-    
-    # 构建数据摘要（精简数据，避免 token 超限）
-    data_summary = []
-    for table in tables_data:
-        table_name = table.get("table_name", "未知表格")
-        sheets = table.get("sheets", [])
-        records = table.get("records", [])
-        
-        # 表格概览
-        table_info = {
-            "表格名称": table_name,
-            "数据表数": len(sheets),
-            "总记录数": len(records),
-            "数据表详情": []
-        }
-        
-        # 每个数据表的统计
-        for sheet in sheets:
-            sheet_info = {
-                "数据表名称": sheet.get("sheet_name", "未知"),
-                "记录数": len(sheet.get("records", []))
-            }
-            table_info["数据表详情"].append(sheet_info)
-        
-        # 抽样 5 条记录作为示例（增加样本量供大模型分析）
-        if records:
-            table_info["数据示例"] = []
-            for record in records[:5]:
-                fields = record.get("fields", {})
-                # 提取关键字段（简化）
-                sample = {}
-                for key in ["标题", "问题", "任务", "名称", "优先级", "状态", "处理人", "创建时间", "负责人"]:
-                    if key in fields:
-                        value = fields[key]
-                        if isinstance(value, dict):
-                            value = value.get("name", value.get("text", str(value)))
-                        sample[key] = value
-                table_info["数据示例"].append(sample)
-        
-        data_summary.append(table_info)
-    
-    user_prompt = f"""请分析以下钉钉 AI 表格数据，生成洞察分析报告。
-
-## 分析范围
-- **筛选关键词**: {keyword if keyword else "全量扫描"}
-- **分析表格数**: {len(tables_data)} 个
-- **总记录数**: {sum(len(t.get("records", [])) for t in tables_data)} 条
-
-## 表格数据摘要
-{json.dumps(data_summary, ensure_ascii=False, indent=2)}
-
-## 请生成报告，包含以下内容
-1. 执行摘要（关键指标）
-2. 详细数据分析（每个表格的数据表详情、示例、洞察）
-3. 风险与异常识别（自动发现数据问题）
-4. 行动建议（具体可执行，包含优先级和时间）
-
-请开始生成报告：
-"""
-    
-    # 构建完整的 prompt
-    full_prompt = f"{system_prompt}\n\n{user_prompt}"
-    
-    print("🤖 使用大模型进行分析...")
-    
-    # 方法 1: 尝试通过 OpenClaw sessions_send 调用（如果在会话中）
-    try:
-        print("   🔄 尝试通过 OpenClaw 会话调用大模型...")
-        # 将 prompt 写入临时文件
-        tmp_file = tempfile.mktemp(suffix='.txt')
-        with open(tmp_file, 'w', encoding='utf-8') as f:
-            f.write(full_prompt)
-        
-        # 尝试使用 openclaw sessions_send（需要会话环境）
-        # 注意：这通常在 OpenClaw 主会话中运行时会成功
-        result = subprocess.run(
-            ["openclaw", "sessions", "send", "--message", f"请分析以下数据并生成报告：{full_prompt[:2000]}..."],
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        
-        if result.returncode == 0 and result.stdout.strip():
-            print("   ✅ OpenClaw 大模型分析完成")
-            os.unlink(tmp_file)
-            return result.stdout.strip()
-        
-        os.unlink(tmp_file)
-    except Exception as e:
-        print(f"   ⚠️  OpenClaw 会话调用失败：{e}")
-    
-    # 方法 2: 使用 mcporter 调用 MCP 大模型（如果配置了）
-    try:
-        print("   🔄 尝试通过 MCP 调用大模型...")
-        config_path = DEFAULT_MCP_CONFIG
-        
-        # 检查是否有大模型 MCP 服务器配置
-        if os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            
-            # 查找大模型服务器
-            llm_server = None
-            for server_name, server_config in config.get("mcpServers", {}).items():
-                if any(k in server_name.lower() for k in ["llm", "model", "qwen", "chat", "completion"]):
-                    llm_server = server_name
-                    break
-            
-            if llm_server:
-                # 通过 mcporter 调用大模型
-                # 将 prompt 写入临时文件避免命令行长度限制
-                prompt_file = tempfile.mktemp(suffix='.prompt')
-                with open(prompt_file, 'w', encoding='utf-8') as f:
-                    f.write(full_prompt)
-                
-                cmd = f"mcporter --config {config_path} call {llm_server}.chat --prompt-file \"{prompt_file}\""
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
-                
-                os.unlink(prompt_file)
-                
-                if result.returncode == 0 and result.stdout.strip():
-                    print("   ✅ MCP 大模型分析完成")
-                    return result.stdout.strip()
-    except Exception as e:
-        print(f"   ⚠️  MCP 大模型调用失败：{e}")
-    
-    # 方法 3: 降级使用本地模板（保底方案）
-    print("   ⚠️  大模型不可用，降级使用本地模板生成报告")
-    print("   💡 提示：配置 MCP 大模型服务器可获得更深度分析")
+    # 使用本地模板生成报告
     return generate_insight_report(tables_data, keyword)
 
 
