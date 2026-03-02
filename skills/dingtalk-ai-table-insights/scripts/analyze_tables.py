@@ -28,6 +28,41 @@ import json
 import subprocess
 import sys
 import os
+import shlex
+from pathlib import Path
+
+
+def get_skill_version() -> str:
+    """
+    从 SKILL.md 自动读取版本号
+    
+    Returns:
+        版本号字符串，如 "1.6.8"，读取失败时返回 "unknown"
+    """
+    # SKILL.md 路径（脚本所在目录的父目录）
+    script_dir = Path(__file__).parent.parent
+    skill_md = script_dir / "SKILL.md"
+    
+    if not skill_md.exists():
+        return "unknown"
+    
+    try:
+        with open(skill_md, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # 匹配 version: xxx 行
+        import re
+        match = re.search(r'^version:\s*(.+)$', content, re.MULTILINE)
+        if match:
+            return match.group(1).strip()
+    except Exception:
+        pass
+    
+    return "unknown"
+
+
+# 自动获取版本号
+SKILL_VERSION = get_skill_version()
 import tempfile
 import time
 
@@ -162,6 +197,8 @@ def run_dingtalk_command(tool_name: str, args: Dict[str, Any] = None) -> Optiona
         - 最多重试 MAX_RETRIES 次
         - 每次重试间隔 RETRY_DELAY_SECONDS 秒
         - 仅对网络错误重试，对业务错误直接返回
+    
+    注意：使用临时文件接收输出，避免大数据量时被截断
     """
     config_path = DEFAULT_MCP_CONFIG
     
@@ -179,63 +216,75 @@ def run_dingtalk_command(tool_name: str, args: Dict[str, Any] = None) -> Optiona
     last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
+            # 使用临时文件接收输出，避免大数据量时被截断
+            tmp_file = tempfile.mktemp(suffix='.json')
             
-            if result.returncode == 0:
-                output = result.stdout.strip()
+            try:
+                # 执行命令，输出重定向到临时文件
+                cmd_redirect = f'{cmd} > "{tmp_file}" 2>&1'
+                result = subprocess.run(cmd_redirect, shell=True, timeout=30)
                 
-                # 尝试多种 JSON 解析策略
-                # 策略 1: 查找第一个 [ 或 { 开始的位置
-                json_start = -1
-                for i, char in enumerate(output):
-                    if char in '[{':
-                        json_start = i
-                        break
+                # 读取文件内容
+                with open(tmp_file, 'r', encoding='utf-8') as f:
+                    output = f.read().strip()
                 
-                if json_start >= 0:
-                    json_str = output[json_start:]
-                    try:
-                        parsed = json.loads(json_str)
-                        return parsed
-                    except json.JSONDecodeError:
-                        # 策略 2: 尝试逐行解析，找到有效的 JSON
-                        lines = output.split('\n')
-                        for i, line in enumerate(lines):
-                            try:
-                                parsed = json.loads(line.strip())
-                                return parsed
-                            except json.JSONDecodeError:
-                                continue
-                        
-                        # 策略 3: 尝试找到最后一个完整的 JSON 对象
-                        json_end = output.rfind(']') + 1
-                        if json_end > json_start:
-                            json_str = output[json_start:json_end]
-                            try:
-                                return json.loads(json_str)
-                            except json.JSONDecodeError:
-                                pass
-                
-                return {"raw": output}
-            else:
-                error_msg = result.stderr.strip()
-                last_error = error_msg
-                
-                # 判断是否可重试的错误
-                if "timeout" in error_msg.lower() or "connection" in error_msg.lower():
-                    if attempt < MAX_RETRIES:
-                        print(f"⚠️  调用失败，{RETRY_DELAY_SECONDS}秒后重试 ({attempt}/{MAX_RETRIES})...")
-                        time.sleep(RETRY_DELAY_SECONDS)
+                # 检查命令是否成功
+                if result.returncode == 0:
+                    # 尝试解析 JSON
+                    if not output:
+                        last_error = "返回内容为空"
                         continue
+                    
+                    json_start = -1
+                    for i, char in enumerate(output):
+                        if char in '[{':
+                            json_start = i
+                            break
+                    
+                    if json_start >= 0:
+                        json_str = output[json_start:]
+                        try:
+                            parsed = json.loads(json_str)
+                            return parsed
+                        except json.JSONDecodeError:
+                            # 尝试逐行解析
+                            lines = output.split('\n')
+                            for line in lines:
+                                try:
+                                    parsed = json.loads(line.strip())
+                                    return parsed
+                                except json.JSONDecodeError:
+                                    continue
+                            
+                            # 尝试找到最后一个完整的 JSON 对象
+                            json_end = output.rfind(']') + 1
+                            if json_end > json_start:
+                                json_str = output[json_start:json_end]
+                                try:
+                                    return json.loads(json_str)
+                                except json.JSONDecodeError:
+                                    pass
+                    
+                    return {"raw": output}
                 else:
-                    # 业务错误，直接返回
-                    return {"error": error_msg, "code": result.returncode}
+                    # 命令失败，读取错误信息
+                    error_msg = output if output else "命令执行失败"
+                    last_error = error_msg
+                    
+                    # 判断是否可重试的错误
+                    if "timeout" in error_msg.lower() or "connection" in error_msg.lower():
+                        if attempt < MAX_RETRIES:
+                            print(f"⚠️  调用失败，{RETRY_DELAY_SECONDS}秒后重试 ({attempt}/{MAX_RETRIES})...")
+                            time.sleep(RETRY_DELAY_SECONDS)
+                            continue
+                    else:
+                        # 业务错误，直接返回
+                        return {"error": error_msg, "code": result.returncode}
+            
+            finally:
+                # 清理临时文件
+                if os.path.exists(tmp_file):
+                    os.unlink(tmp_file)
                     
         except subprocess.TimeoutExpired:
             last_error = "命令执行超时"
@@ -328,7 +377,7 @@ def get_sheet_list(doc_id: str) -> List[Dict]:
     return []
 
 
-def read_sheet_data_paginated(doc_id: str, sheet_identifier: str, page_limit: int = 50) -> List[Dict]:
+def read_sheet_data_paginated(doc_id: str, sheet_identifier: str, page_limit: int = 50, max_records: int = None) -> List[Dict]:
     """
     分页读取单个 Sheet 的所有数据（解决大数据量 JSON 解析失败问题）
     
@@ -336,6 +385,7 @@ def read_sheet_data_paginated(doc_id: str, sheet_identifier: str, page_limit: in
         doc_id: 表格文档 ID
         sheet_identifier: 数据表 ID 或名称
         page_limit: 每页读取记录数（建议 50）
+        max_records: 最大读取记录数（可选，达到后提前停止）
     
     Returns:
         所有记录列表
@@ -390,6 +440,11 @@ def read_sheet_data_paginated(doc_id: str, sheet_identifier: str, page_limit: in
             
             all_records.extend(records)
             
+            # 达到最大记录数，停止
+            if max_records and len(all_records) >= max_records:
+                all_records = all_records[:max_records]
+                break
+            
             # 没有更多数据或返回空记录，停止
             if not cursor or len(records) == 0:
                 break
@@ -433,7 +488,7 @@ def read_all_sheets_data(doc_id: str, limit_per_sheet: int = DEFAULT_LIMIT, use_
         
         # 使用分页读取（推荐）或传统方式
         if use_pagination:
-            records = read_sheet_data_paginated(doc_id, sheet_identifier, page_limit=50)
+            records = read_sheet_data_paginated(doc_id, sheet_identifier, page_limit=50, max_records=limit_per_sheet)
         else:
             result = run_dingtalk_command("search_base_record", {
                 "dentryUuid": doc_id,
@@ -553,9 +608,8 @@ def analyze_with_llm(tables_data: List[Dict], keyword: str = "") -> str:
     """
     使用大模型分析表格数据，生成洞察报告（默认启用）
     
-    检测运行环境：
-    - 如果在 OpenClaw 会话中，使用 sessions_spawn 调用大模型
-    - 否则使用本地模板（降级方案）
+    通过 openclaw agent --agent main 调用大模型
+    参考 analyze_with_llm.py 实现，发送详细数据样本
     
     Args:
         tables_data: 表格数据列表
@@ -564,76 +618,138 @@ def analyze_with_llm(tables_data: List[Dict], keyword: str = "") -> str:
     Returns:
         洞察报告（Markdown 格式）
     """
-    import os
+    import tempfile
     
     print("🤖 使用大模型进行分析...")
     
-    # 检测是否在 OpenClaw 会话环境中
-    # 检查是否有 OpenClaw 会话存储
-    session_store = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
-    in_openclaw_session = os.path.exists(session_store)
-    
-    if in_openclaw_session:
-        print("   ℹ️  检测到 OpenClaw 会话环境")
-        print("   🔄 尝试调用大模型...")
+    # 1. 构建详细的数据摘要（参考 analyze_with_llm.py）
+    data_summary = []
+    for table in tables_data:
+        table_name = table.get("table_name", "未知表格")
+        sheets = table.get("sheets", [])
+        records = table.get("records", [])
         
-        # 构建简化的分析请求
-        summary = {
-            "keyword": keyword,
-            "tables_count": len(tables_data),
-            "total_records": sum(len(t.get("records", [])) for t in tables_data),
-            "tables": [
-                {
-                    "name": t.get("table_name"),
-                    "records": len(t.get("records", [])),
-                    "sheets": len(t.get("sheets", []))
-                }
-                for t in tables_data
-            ]
+        table_info = {
+            "表格名称": table_name,
+            "数据表数": len(sheets),
+            "总记录数": len(records),
+            "数据表详情": []
         }
         
-        prompt = f"""请分析以下钉钉 AI 表格数据并生成洞察报告：
+        # 添加每个数据表的详情
+        for sheet in sheets:
+            sheet_info = {
+                "数据表名称": sheet.get("sheet_name", "未知"),
+                "记录数": len(sheet.get("records", []))
+            }
+            table_info["数据表详情"].append(sheet_info)
+        
+        # 添加数据样本（最多 5 条）
+        if records:
+            table_info["数据示例"] = []
+            for record in records[:5]:
+                fields = record.get("fields", {})
+                sample = {}
+                # 提取关键字段
+                for key in ["标题", "问题", "任务", "名称", "优先级", "状态", "处理人", "创建时间", "工作类型", "产出效率"]:
+                    if key in fields:
+                        value = fields[key]
+                        if isinstance(value, dict):
+                            value = value.get("name", value.get("text", str(value)))
+                        sample[key] = value
+                table_info["数据示例"].append(sample)
+        
+        data_summary.append(table_info)
+    
+    total_records = sum(len(t.get("records", [])) for t in tables_data)
+    
+    prompt = f"""请分析以下钉钉 AI 表格数据并生成洞察报告：
 
 **关键词**: {keyword or '全量扫描'}
-**表格数**: {len(tables_data)}
-**总记录数**: {summary['total_records']}
+**分析表格数**: {len(tables_data)} 个
+**总记录数**: {total_records} 条
 
-**表格详情**:
-{json.dumps(summary['tables'], ensure_ascii=False, indent=2)}
+**表格数据摘要**:
+{json.dumps(data_summary, ensure_ascii=False, indent=2)}
 
 请生成一份包含以下内容的 Markdown 报告：
 1. 执行摘要（关键指标）
-2. 详细数据分析
-3. 风险与异常识别
-4. 行动建议（具体可执行）
+2. 详细数据分析（每个表格的数据表详情、示例、洞察）
+3. 风险与异常识别（自动发现数据问题）
+4. 行动建议（具体可执行，包含优先级和时间）
 
 报告要求：
 - 使用 Markdown 格式
 - 适当使用 emoji
 - 800-1500 字
 - 适合在钉钉中查看"""
-        
-        try:
-            # 使用 openclaw agent 调用
-            result = subprocess.run(
-                ["openclaw", "agent", "--message", prompt, "--json"],
-                capture_output=True,
-                text=True,
-                timeout=90
-            )
-            
-            if result.returncode == 0 and result.stdout.strip():
-                output = json.loads(result.stdout.strip())
-                reply = output.get("reply", "")
-                if reply:
-                    print("   ✅ 大模型分析完成")
-                    return reply
-            
-            print(f"   ⚠️  调用失败：{result.stderr[:100] if result.stderr else '无响应'}")
-        except Exception as e:
-            print(f"   ⚠️  调用异常：{e}")
     
-    # 降级使用本地模板
+    # 2. 使用临时文件调用大模型（避免 64KB 截断）
+    tmp_file = tempfile.mktemp(suffix='.json')
+    try:
+        print(f"   🔄 调用 OpenClaw 大模型（--agent main）...")
+        
+        # 使用 --agent main 参数（测试成功）
+        cmd = f'openclaw agent --agent main --message {shlex.quote(prompt[:10000])} --json --timeout 120 > "{tmp_file}" 2>&1'
+        
+        exit_code = subprocess.call(cmd, shell=True, timeout=130)
+        
+        # 读取输出
+        if os.path.exists(tmp_file):
+            with open(tmp_file, 'r', encoding='utf-8') as f:
+                output = f.read()
+            
+            if output.strip():
+                # 跳过可能的日志输出，找到 JSON 开始位置
+                json_start = -1
+                for i, char in enumerate(output):
+                    if char == '{':
+                        json_start = i
+                        break
+                
+                if json_start >= 0:
+                    output = output[json_start:]
+                
+                try:
+                    data = json.loads(output)
+                    
+                    # 尝试多种可能的回复字段
+                    reply = ""
+                    
+                    # 格式 1: {"reply": "..."}
+                    if data.get("reply"):
+                        reply = data.get("reply")
+                    # 格式 2: {"result": {"payloads": [{"text": "..."}]}}
+                    elif data.get("result", {}).get("payloads"):
+                        payloads = data["result"]["payloads"]
+                        if payloads and isinstance(payloads, list) and len(payloads) > 0:
+                            reply = payloads[0].get("text", "")
+                    # 格式 3: {"message": "..."}
+                    elif data.get("message"):
+                        reply = data.get("message")
+                    
+                    if reply:
+                        print("   ✅ 大模型分析完成")
+                        return reply
+                    elif 'error' in data:
+                        print(f"   ⚠️  API 错误：{data.get('error', '未知错误')}")
+                    else:
+                        print(f"   ⚠️  无法解析回复格式")
+                except json.JSONDecodeError as e:
+                    print(f"   ⚠️  JSON 解析失败：{e}")
+                    print(f"   Output preview: {output[:300]}")
+        
+        print(f"   ⚠️  调用失败（exit code: {exit_code}）")
+    except subprocess.TimeoutExpired:
+        print("   ⚠️  调用超时（>120 秒）")
+    except Exception as e:
+        print(f"   ⚠️  调用异常：{e}")
+    finally:
+        # 清理临时文件
+        if os.path.exists(tmp_file):
+            os.unlink(tmp_file)
+    
+    # 3. 降级使用本地模板
     print("   📝 使用本地模板生成报告（快速模式）")
     return generate_insight_report(tables_data, keyword)
 
@@ -662,7 +778,7 @@ def generate_insight_report(tables_data: List[Dict], keyword: str = "") -> str:
     report = f"""# 📊 {keyword if keyword else 'AI 表格'}洞察分析报告
 
 **生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
-**分析工具**: dingtalk-ai-table-insights v1.2.0  
+**分析工具**: dingtalk-ai-table-insights v{SKILL_VERSION}  
 **筛选关键词**: {keyword if keyword else '全量扫描'}
 
 ---
@@ -893,9 +1009,9 @@ def generate_insight_report(tables_data: List[Dict], keyword: str = "") -> str:
     report += f"- **数据来源**: 钉钉 AI 表格（关键词：{keyword if keyword else '全量'}）\n"
     report += f"- **分析范围**: {total_tables} 个表格，{total_sheets} 个数据表，{total_records} 条记录\n"
     report += "- **分析方法**: 分页读取、自动合并、智能分析\n"
-    report += "- **数据抽样**: 每个数据表最多读取前 50 条记录用于分析\n"
+    report += f"- **数据抽样**: 每个数据表最多读取前 {DEFAULT_LIMIT} 条记录用于分析\n"
     report += "\n---\n\n"
-    report += f"*报告生成：dingtalk-ai-table-insights v1.2.0*  \n"
+    report += f"*报告生成：dingtalk-ai-table-insights v{SKILL_VERSION}*  \n"
     report += f"*分析时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n"
     
     return report
@@ -958,7 +1074,7 @@ def generate_log_file(tables_data: List[Dict], failed_tables: List[Dict], keywor
         log += "## ✅ 所有表格读取成功，无失败记录。\n"
     
     log += "\n---\n\n"
-    log += f"*日志生成：dingtalk-ai-table-insights v1.2.0*  \n"
+    log += f"*日志生成：dingtalk-ai-table-insights v{SKILL_VERSION}*  \n"
     log += f"*时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n"
     
     return log
