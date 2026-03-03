@@ -102,7 +102,7 @@ CACHE_DIR = Path.home() / ".cache" / "dingtalk-ai-table-insights"
 CACHE_EXPIRY_SECONDS = 300  # 5 分钟缓存
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 2
-DEFAULT_LIMIT = 50
+DEFAULT_LIMIT = 100  # 每个数据表最多随机抽样 100 条
 
 # MCP 配置文件路径（可通过环境变量覆盖）
 DEFAULT_MCP_CONFIG = os.getenv(
@@ -460,18 +460,20 @@ def read_sheet_data_paginated(doc_id: str, sheet_identifier: str, page_limit: in
     return all_records
 
 
-def read_all_sheets_data(doc_id: str, limit_per_sheet: int = DEFAULT_LIMIT, use_pagination: bool = True) -> List[Dict]:
+def read_all_sheets_data(doc_id: str, limit_per_sheet: int = 100, use_pagination: bool = True) -> List[Dict]:
     """
-    读取表格的所有 Sheet 数据
+    读取表格的所有 Sheet 数据（每个 Sheet 最多随机抽样 100 条）
     
     Args:
         doc_id: 表格文档 ID
-        limit_per_sheet: 每个 Sheet 的读取记录数限制
+        limit_per_sheet: 每个 Sheet 的最大记录数（超过则随机抽样，默认 100）
         use_pagination: 是否使用分页读取（推荐 True，解决大数据量问题）
     
     Returns:
         包含所有 Sheet 数据的列表，每个元素包含 sheet_name 和 records
     """
+    import random
+    
     sheets = get_sheet_list(doc_id)
     
     if not sheets:
@@ -487,8 +489,14 @@ def read_all_sheets_data(doc_id: str, limit_per_sheet: int = DEFAULT_LIMIT, use_
         sheet_identifier = sheet_id if sheet_id else sheet_name
         
         # 使用分页读取（推荐）或传统方式
+        # 先读取所有数据，再随机抽样
         if use_pagination:
-            records = read_sheet_data_paginated(doc_id, sheet_identifier, page_limit=50, max_records=limit_per_sheet)
+            records = read_sheet_data_paginated(doc_id, sheet_identifier, page_limit=50, max_records=None)
+            
+            # 如果超过 limit_per_sheet 条，随机抽样
+            if len(records) > limit_per_sheet:
+                print(f"         📊 {sheet_name}: {len(records)}条 → 随机抽样{limit_per_sheet}条")
+                records = random.sample(records, limit_per_sheet)
         else:
             result = run_dingtalk_command("search_base_record", {
                 "dentryUuid": doc_id,
@@ -523,10 +531,11 @@ def read_all_sheets_data(doc_id: str, limit_per_sheet: int = DEFAULT_LIMIT, use_
                 records = []
         
         if records:
+            # 读取所有数据，不做截断（抽样在分析阶段进行）
             all_data.append({
                 "sheet_name": sheet_name,
                 "sheet_id": sheet_id,
-                "records": records[:limit_per_sheet] if len(records) > limit_per_sheet else records
+                "records": records
             })
     
     return all_data
@@ -673,16 +682,38 @@ def analyze_with_llm(tables_data: List[Dict], keyword: str = "") -> str:
 {json.dumps(data_summary, ensure_ascii=False, indent=2)}
 
 请生成一份包含以下内容的 Markdown 报告：
-1. 执行摘要（关键指标）
-2. 详细数据分析（每个表格的数据表详情、示例、洞察）
-3. 风险与异常识别（自动发现数据问题）
-4. 行动建议（具体可执行，包含优先级和时间）
 
-报告要求：
-- 使用 Markdown 格式
-- 适当使用 emoji
+## 报告结构（必须包含）
+
+### 1. 执行摘要
+- 关键指标汇总（使用表格展示）
+- 核心发现（3-5 条）
+
+### 2. 详细数据分析
+- 每个表格的数据表详情、示例、洞察
+
+### 3. 🔗 跨文档交叉验证分析（重点！必须单独成节）
+**这是报告的核心章节，请基于提供的数据进行以下分析：**
+- **数据量级对比**: 对比各表格的记录数，评估数据代表性
+- **指标一致性检查**: 如果多个表格有相同指标（如任务数、人数），检查是否一致
+- **关联发现**: 发现表格间的隐含关系（如任务 - 缺陷关联、人效 - 质量关联）
+- **综合洞察**: 基于多表格数据给出全局性结论（不能仅从单一表格得出）
+
+### 4. 风险与异常识别
+- 按优先级排序（高/中/低）
+- 包含数据质量评估
+
+### 5. 行动建议
+- 具体可执行
+- 包含优先级、负责人、时间、验收标准
+
+## 输出要求
+- 使用 Markdown 表格展示跨表格对比数据
+- 适当使用 emoji 增强可读性
 - 800-1500 字
-- 适合在钉钉中查看"""
+- 适合在钉钉中查看
+
+请开始生成报告："""
     
     # 2. 使用临时文件调用大模型（避免 64KB 截断）
     tmp_file = tempfile.mktemp(suffix='.json')
@@ -730,6 +761,40 @@ def analyze_with_llm(tables_data: List[Dict], keyword: str = "") -> str:
                     
                     if reply:
                         print("   ✅ 大模型分析完成")
+                        
+                        # ========== 轻量后处理：仅修复版本号 ==========
+                        from datetime import datetime
+                        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        
+                        # 1. 构建标准头部
+                        header = f"""# 📊 {keyword if keyword else 'AI 表格'}洞察分析报告
+
+**生成时间**: {current_time}  
+**分析工具**: dingtalk-ai-table-insights v{SKILL_VERSION}  
+**筛选关键词**: {keyword if keyword else '全量扫描'}
+
+---
+
+"""
+                        # 2. 移除 LLM 可能生成的旧头部
+                        lines = reply.split('\n')
+                        content_start = len(lines)
+                        for i, line in enumerate(lines[:30]):
+                            stripped = line.strip()
+                            if stripped.startswith('##') and not stripped.startswith('###'):
+                                content_start = i
+                                break
+                        reply = header + '\n'.join(lines[content_start:])
+                        
+                        # 3. 强制验证版本号
+                        if f'v{SKILL_VERSION}' not in reply[:500]:
+                            divider_idx = reply.find('---')
+                            if divider_idx > 0:
+                                reply = reply[:divider_idx+3] + f'\n**分析工具**: dingtalk-ai-table-insights v{SKILL_VERSION}\n' + reply[divider_idx+3:]
+                        
+                        print(f"   ✅ 版本号：v{SKILL_VERSION}")
+                        # ========== 后处理结束 ==========
+                        
                         return reply
                     elif 'error' in data:
                         print(f"   ⚠️  API 错误：{data.get('error', '未知错误')}")
