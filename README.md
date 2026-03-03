@@ -41,14 +41,22 @@ cp -r dingtalk-ai-table-insights ~/.openclaw/skills/
 clawhub install dingtalk-ai-table-insights
 ```
 
-### 3. 运行分析
+### 3. 使用方式
 
-```bash
-# 关键词筛选
-python3 scripts/analyze_tables.py --keyword "销售"
+在 OpenClaw 中直接使用自然语言对话：
 
-# 全量扫描
-python3 scripts/analyze_tables.py
+```
+# 分析特定项目
+帮我使用 dingtalk-ai-table-insights 技能，分析一下"华东 XX 项目"相关的表格情况
+
+# 销售数据分析
+帮我分析一下销售相关的表格，看看有什么风险和机会
+
+# 招聘进展
+分析一下招聘相关的表格情况
+
+# 全局扫描
+帮我扫描所有表格，给出整体洞察
 ```
 
 ---
@@ -84,12 +92,12 @@ dingtalk-ai-table (数据 + 配置)
 
 ## 使用场景
 
-| 场景 | 命令 |
+| 场景 | 示例对话 |
 |------|------|
-| 销售分析 | `--keyword "销售"` |
-| 项目追踪 | `--keyword "华东项目"` |
-| 招聘分析 | `--keyword "招聘"` |
-| 全局扫描 | 不指定参数 |
+| 销售分析 | "分析一下销售相关的表格" |
+| 项目追踪 | "帮我看看华东项目相关的表格情况" |
+| 招聘分析 | "分析一下招聘相关的表格" |
+| 全局扫描 | "扫描所有表格，给出整体洞察" |
 
 ## 安全说明
 
