@@ -20,6 +20,23 @@ clawhub install dingtalk-ai-table
 
 ### 2. 安装本技能
 
+**⚠️ 注意：** 由于 GitHub 账号发布限制，本技能暂未在 ClawHub 上架。请使用以下方式之一安装：
+
+#### 方式 A：手动安装（推荐）
+
+```bash
+# 克隆或下载本仓库到本地
+git clone https://github.com/tomray4ai/dingtalk-ai-table-insights.git
+
+# 复制到 OpenClaw 技能目录
+cp -r dingtalk-ai-table-insights ~/.openclaw/skills/
+
+# 或者直接使用 workspace 中的版本（开发模式）
+# 技能已位于：~/openclaw/workspace/skills/dingtalk-ai-table-insights
+```
+
+#### 方式 B：等待 ClawHub 上架（14 天后）
+
 ```bash
 clawhub install dingtalk-ai-table-insights
 ```
