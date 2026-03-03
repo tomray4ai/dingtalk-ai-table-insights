@@ -4,44 +4,10 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
+.env
+.venv
 venv/
 ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Output files
-*.md
-!SKILL.md
-!VISION.md
-!README.md
-!CHANGELOG.md
-!COMPLIANCE.md
-!UPDATE_SUMMARY.md
-reports/*.md
-
-# JSON files (except metadata)
-*.json
-!package.json
-!metadata.json
-
-# MCP config (managed by dingtalk-ai-table skill)
-../../config/mcporter.json
-config/mcporter.json
-config/mcporter.json.example
 
 # IDE
 .idea/
@@ -50,20 +16,16 @@ config/mcporter.json.example
 *.swo
 *~
 
+# Test & Debug
+reports/
+*_test.py
+test_*.py
+*.log
+
 # OS
 .DS_Store
 Thumbs.db
 
-# ClawHub local state
-.clawhub/
-
-# Environment
-.env
-.env.local
-.env.*.local
-
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Temporary
+*.tmp
+*.bak

@@ -1,7 +1,7 @@
 ---
 name: dingtalk-ai-table-insights
 description: 钉钉 AI 表格跨表格洞察分析。支持按关键词筛选特定业务/项目的 AI 表格，进行综合分析，识别风险点、数据异常、业务洞察。Use when user wants to analyze multiple AI tables by keyword/topic for insights, risks, and anomalies.
-version: 1.6.10
+version: "1.6.10"
 metadata:
   openclaw:
     requires:
