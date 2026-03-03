@@ -32,7 +32,7 @@ git clone https://github.com/tomray4ai/dingtalk-ai-table-insights.git
 cp -r dingtalk-ai-table-insights ~/.openclaw/skills/
 
 # 或者直接使用 workspace 中的版本（开发模式）
-# 技能已位于：~/openclaw/workspace/skills/dingtalk-ai-table-insights
+# 技能已位于：~/openclaw/workspace/
 ```
 
 #### 方式 B：等待 ClawHub 上架（14 天后）
